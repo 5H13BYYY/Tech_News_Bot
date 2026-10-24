@@ -1,5 +1,6 @@
 """Fetch stories from Hacker News and Techmeme."""
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from urllib.parse import parse_qsl, urlencode, urlparse
 
 import feedparser
@@ -19,6 +20,7 @@ class Story:
     points: int | None = None
     comments: int | None = None
     hn_id: str | None = None
+    published: datetime | None = None  # timezone-aware, UTC
 
     @property
     def key(self) -> str:
@@ -39,6 +41,15 @@ def normalize_url(url: str) -> str:
     ]
     path = p.path.rstrip("/")
     return f"{host}{path}" + (f"?{urlencode(query)}" if query else "")
+
+
+def _from_unix(ts) -> datetime | None:
+    return datetime.fromtimestamp(ts, tz=timezone.utc) if ts else None
+
+
+def _from_struct(t) -> datetime | None:
+    """feedparser gives a UTC time.struct_time."""
+    return datetime(*t[:6], tzinfo=timezone.utc) if t else None
 
 
 def fetch_hacker_news() -> list[Story]:
@@ -65,6 +76,7 @@ def fetch_hacker_news() -> list[Story]:
                 points=points,
                 comments=hit.get("num_comments"),
                 hn_id=str(hit["objectID"]),
+                published=_from_unix(hit.get("created_at_i")),
             )
         )
     return stories
@@ -87,6 +99,7 @@ def fetch_techmeme() -> list[Story]:
                 title=entry.title.strip(),
                 url=entry.link,
                 discussion_url=entry.get("comments"),
+                published=_from_struct(entry.get("published_parsed")),
             )
         )
     return stories

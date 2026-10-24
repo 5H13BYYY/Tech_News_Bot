@@ -1,6 +1,8 @@
 """Format stories and send them through the Telegram Bot API."""
 import html
 import time
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 
@@ -12,6 +14,31 @@ API_URL = "https://api.telegram.org/bot{token}/sendMessage"
 
 def _link(label: str, url: str) -> str:
     return f'<a href="{html.escape(url, quote=True)}">{label}</a>'
+
+
+def _tz():
+    try:
+        return ZoneInfo(config.TIMEZONE)
+    except ZoneInfoNotFoundError:  # e.g. Windows without the tzdata package
+        return timezone.utc
+
+
+def _ago(dt: datetime) -> str:
+    secs = int((datetime.now(timezone.utc) - dt).total_seconds())
+    if secs < 60:
+        return "just now"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins}m ago"
+    hours = mins // 60
+    if hours < 24:
+        return f"{hours}h ago"
+    return f"{hours // 24}d ago"
+
+
+def _when(dt: datetime) -> str:
+    local = dt.astimezone(_tz())
+    return f"{local.strftime('%b %d, %H:%M %Z')} · {_ago(dt)}"
 
 
 def format_story(s: Story) -> str:
@@ -33,7 +60,10 @@ def format_story(s: Story) -> str:
     if links:
         lines.append(" · ".join(links))
 
-    lines.append(f"<i>{s.source}</i>")
+    footer = s.source
+    if s.published:
+        footer += f" · {_when(s.published)}"
+    lines.append(f"<i>{footer}</i>")
     return "\n".join(lines)
 
 

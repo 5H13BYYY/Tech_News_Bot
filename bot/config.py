@@ -31,6 +31,7 @@ SEEN_TTL_DAYS = 30         # forget old URLs after this long
 LOOP_INTERVAL_SECONDS = 600  # used only with --loop
 REQUEST_TIMEOUT = 15
 USER_AGENT = "personal-tech-news-bot/1.0"
+TIMEZONE = "Asia/Phnom_Penh"  # IANA name, used for the timestamp in alerts
 
 # --- Keyword filters (case-insensitive, matched against the title) ----
 BLOCKLIST: list[str] = []  # e.g. ["crypto", "nft"]
