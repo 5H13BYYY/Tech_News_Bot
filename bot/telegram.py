@@ -7,16 +7,14 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import requests
 
 from . import config
+from .classify import format_tags
 from .sources import Story
 
 API_URL = "https://api.telegram.org/bot{token}/sendMessage"
+ICONS = {"HN": "🟠", "Techmeme": "📰", "Lobsters": "🦞"}
 
 
-def _link(label: str, url: str) -> str:
-    return f'<a href="{html.escape(url, quote=True)}">{label}</a>'
-
-
-def _tz():
+def get_tz():
     try:
         return ZoneInfo(config.TIMEZONE)
     except ZoneInfoNotFoundError:  # e.g. Windows without the tzdata package
@@ -37,13 +35,18 @@ def _ago(dt: datetime) -> str:
 
 
 def _when(dt: datetime) -> str:
-    local = dt.astimezone(_tz())
+    local = dt.astimezone(get_tz())
     return f"{local.strftime('%b %d, %H:%M %Z')} · {_ago(dt)}"
 
 
+def link(label: str, url: str) -> str:
+    return f'<a href="{html.escape(url, quote=True)}">{label}</a>'
+
+
 def format_story(s: Story) -> str:
-    icon = "🟠" if s.source == "HN" else "📰"
-    lines = [f"{icon} <b>{html.escape(s.title)}</b>"]
+    lines = [f"{ICONS.get(s.source, '📰')} <b>{html.escape(s.title)}</b>"]
+    if config.CLASSIFY_ENABLED:
+        lines.append(format_tags(s.title))
 
     if s.points is not None:
         stats = f"▲ {s.points}"
@@ -53,10 +56,10 @@ def format_story(s: Story) -> str:
 
     links = []
     if s.url != s.discussion_url:
-        links.append(_link("Article", s.url))
+        links.append(link("Article", s.url))
     if s.discussion_url:
-        label = "Comments" if s.source == "HN" else "Techmeme"
-        links.append(_link(label, s.discussion_url))
+        label = "Techmeme" if s.source == "Techmeme" else "Comments"
+        links.append(link(label, s.discussion_url))
     if links:
         lines.append(" · ".join(links))
 
@@ -67,13 +70,13 @@ def format_story(s: Story) -> str:
     return "\n".join(lines)
 
 
-def send_message(text: str) -> None:
+def send_message(text: str, preview: bool = True) -> None:
     url = API_URL.format(token=config.TELEGRAM_TOKEN)
     payload = {
         "chat_id": config.TELEGRAM_CHAT_ID,
         "text": text,
         "parse_mode": "HTML",
-        "disable_web_page_preview": False,
+        "disable_web_page_preview": not preview,
     }
     for _ in range(3):
         r = requests.post(url, json=payload, timeout=config.REQUEST_TIMEOUT)

@@ -1,4 +1,4 @@
-"""Fetch stories from Hacker News and Techmeme."""
+"""Fetch stories from Hacker News, Techmeme and Lobsters."""
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import parse_qsl, urlencode, urlparse
@@ -13,7 +13,7 @@ HEADERS = {"User-Agent": config.USER_AGENT}
 
 @dataclass
 class Story:
-    source: str                 # "HN" or "Techmeme"
+    source: str                 # "HN", "Techmeme" or "Lobsters"
     title: str
     url: str
     discussion_url: str | None = None
@@ -24,7 +24,7 @@ class Story:
 
     @property
     def key(self) -> str:
-        """Dedup key. Same article from HN and Techmeme -> same key."""
+        """Dedup key. Same article from different sources -> same key."""
         if self.url.startswith("https://news.ycombinator.com/item"):
             return f"hn:{self.hn_id}"
         return normalize_url(self.url)
@@ -52,7 +52,18 @@ def _from_struct(t) -> datetime | None:
     return datetime(*t[:6], tzinfo=timezone.utc) if t else None
 
 
-def fetch_hacker_news() -> list[Story]:
+def _from_iso(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def fetch_hacker_news(min_points: int | None = None) -> list[Story]:
+    threshold = config.HN_MIN_POINTS if min_points is None else min_points
     r = requests.get(
         config.HN_API,
         params={"tags": "front_page", "hitsPerPage": config.HN_MAX_ITEMS},
@@ -64,7 +75,7 @@ def fetch_hacker_news() -> list[Story]:
     stories = []
     for hit in r.json().get("hits", []):
         points = hit.get("points") or 0
-        if points < config.HN_MIN_POINTS or not hit.get("title"):
+        if points < threshold or not hit.get("title"):
             continue
         hn_url = f"https://news.ycombinator.com/item?id={hit['objectID']}"
         stories.append(
@@ -100,6 +111,34 @@ def fetch_techmeme() -> list[Story]:
                 url=entry.link,
                 discussion_url=entry.get("comments"),
                 published=_from_struct(entry.get("published_parsed")),
+            )
+        )
+    return stories
+
+
+def fetch_lobsters(min_score: int | None = None) -> list[Story]:
+    threshold = config.LOBSTERS_MIN_SCORE if min_score is None else min_score
+    r = requests.get(
+        config.LOBSTERS_URL, headers=HEADERS, timeout=config.REQUEST_TIMEOUT
+    )
+    r.raise_for_status()
+
+    stories = []
+    for item in r.json()[: config.LOBSTERS_MAX_ITEMS]:
+        score = item.get("score") or 0
+        discussion = item.get("comments_url") or item.get("short_id_url")
+        url = item.get("url") or discussion  # text posts have no external URL
+        if score < threshold or not item.get("title") or not url:
+            continue
+        stories.append(
+            Story(
+                source="Lobsters",
+                title=item["title"],
+                url=url,
+                discussion_url=discussion,
+                points=score,
+                comments=item.get("comment_count"),
+                published=_from_iso(item.get("created_at")),
             )
         )
     return stories
